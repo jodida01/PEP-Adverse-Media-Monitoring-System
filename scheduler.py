@@ -1,15 +1,18 @@
 import schedule
 import time
 import subprocess
+import sys
 
 def job():
     print("Running AML scan...")
-    subprocess.run(["python", "app.py"])
 
-# run every 24 hours
+    # Use SAME Python interpreter as current venv
+    subprocess.run([sys.executable, "app.py"])
+
+# Run every 24 hours
 schedule.every(24).hours.do(job)
 
-# optional: run immediately once on startup
+# Run immediately when started
 job()
 
 while True:
