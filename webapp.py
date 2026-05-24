@@ -1,116 +1,223 @@
-from flask import Flask, render_template_string, redirect, url_for
-import csv
-import subprocess
+from flask import Flask, render_template_string, jsonify, request, send_file
+from database import get_alerts
+from datetime import datetime
+import io
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 
 app = Flask(__name__)
 
-HTML_TEMPLATE = """
+# -------------------------
+# DASHBOARD UI (PRODUCTION STYLE)
+# -------------------------
+HTML = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AML Monitoring Dashboard</title>
-    <style>
-        body { font-family: Arial; margin: 40px; background: #f4f6f9; }
-        h1 { color: #333; }
+    <title>AML Production Dashboard</title>
 
-        .btn {
-            background-color: #2c3e50;
-            color: white;
-            padding: 10px 20px;
-            border: none;
-            cursor: pointer;
-            margin-bottom: 20px;
-            font-size: 16px;
+    <style>
+        body {
+            font-family: Arial;
+            margin: 25px;
+            background: #f4f6f9;
         }
 
-        .btn:hover {
-            background-color: #1a252f;
+        h1 {
+            color: #2c3e50;
+        }
+
+        .controls {
+            margin-bottom: 15px;
+        }
+
+        button {
+            padding: 10px 14px;
+            margin-right: 8px;
+            border: none;
+            cursor: pointer;
+            background: #2c3e50;
+            color: white;
+            border-radius: 5px;
+        }
+
+        button:hover {
+            background: #1a252f;
         }
 
         table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 20px;
+            background: white;
+            margin-top: 15px;
         }
 
         th, td {
-            padding: 12px;
+            padding: 10px;
             border: 1px solid #ddd;
-            text-align: left;
+            font-size: 14px;
         }
 
         th {
-            background-color: #2c3e50;
+            background: #2c3e50;
             color: white;
         }
 
-        tr:nth-child(even) {
-            background-color: #f2f2f2;
+        .HIGH {
+            color: red;
+            font-weight: bold;
         }
 
-        .risk {
-            color: red;
+        .PEP {
+            color: purple;
             font-weight: bold;
         }
     </style>
 </head>
+
 <body>
 
-<h1>AML / PEP Monitoring Dashboard</h1>
+<h1>🔥 AML / PEP Real-Time Monitoring System</h1>
 
-<a href="/run">
-    <button class="btn">RUN SCAN</button>
-</a>
+<div class="controls">
+    <button onclick="loadData('ALL')">All Alerts</button>
+    <button onclick="loadData('HIGH')">High Risk</button>
+    <button onclick="loadData('PEP')">PEP Alerts</button>
+    <button onclick="window.location='/export'">Export PDF</button>
+</div>
 
 <table>
-    <tr>
-        <th>Name</th>
-        <th>Headline</th>
-        <th>Keyword</th>
-    </tr>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Headline</th>
+            <th>Keyword</th>
+            <th>Risk Level</th>
+            <th>Score</th>
+            <th>Timestamp</th>
+        </tr>
+    </thead>
 
-    {% for row in data %}
-    <tr>
-        <td>{{ row[0] }}</td>
-        <td>{{ row[1] }}</td>
-        <td class="risk">{{ row[2] }}</td>
-    </tr>
-    {% endfor %}
-
+    <tbody id="table"></tbody>
 </table>
+
+<script>
+
+async function loadData(filter="ALL") {
+
+    const res = await fetch("/data?filter=" + filter);
+    const data = await res.json();
+
+    let rows = "";
+
+    data.forEach(r => {
+
+        let riskClass = "";
+
+        if (r.risk_level && r.risk_level.includes("HIGH")) {
+            riskClass = "HIGH";
+        } else if (r.risk_level && r.risk_level.includes("PEP")) {
+            riskClass = "PEP";
+        }
+
+        rows += `
+        <tr>
+            <td>${r.name}</td>
+            <td>${r.headline}</td>
+            <td>${r.keyword}</td>
+            <td class="${riskClass}">${r.risk_level || ""}</td>
+            <td>${r.score}</td>
+            <td>${r.timestamp}</td>
+        </tr>
+        `;
+    });
+
+    document.getElementById("table").innerHTML = rows;
+}
+
+// auto refresh every 5 seconds
+setInterval(() => loadData("ALL"), 5000);
+loadData("ALL");
+
+</script>
 
 </body>
 </html>
 """
 
-# =========================
-# DASHBOARD PAGE
-# =========================
+# -------------------------
+# DASHBOARD
+# -------------------------
 @app.route("/")
 def dashboard():
+    return render_template_string(HTML)
 
-    data = []
+# -------------------------
+# LIVE API
+# -------------------------
+@app.route("/data")
+def data():
+    filter_type = request.args.get("filter", "ALL")
 
-    try:
-        with open("alerts.csv", "r", encoding="utf-8") as file:
-            reader = csv.reader(file)
-            next(reader)
-            data = list(reader)
-    except:
-        data = []
+    rows = get_alerts()
 
-    return render_template_string(HTML_TEMPLATE, data=data)
+    cleaned = []
+    for r in rows:
+        risk = (r[3] or "").upper()
 
-# =========================
-# RUN SCAN BUTTON ACTION
-# =========================
-@app.route("/run")
-def run_scan():
+        if filter_type == "HIGH" and "HIGH" not in risk:
+            continue
+        if filter_type == "PEP" and "PEP" not in risk:
+            continue
 
-    # Run your AML script
-    subprocess.run(["python", "app.py"])
+        cleaned.append({
+            "name": r[0],
+            "headline": r[1],
+            "keyword": r[2],
+            "risk_level": r[3],
+            "score": r[4],
+            "timestamp": r[5]
+        })
 
-    return redirect(url_for("dashboard"))
+    return jsonify(cleaned)
 
+# -------------------------
+# PDF EXPORT (COMPLIANCE REPORT)
+# -------------------------
+@app.route("/export")
+def export_pdf():
+
+    rows = get_alerts()
+
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, 750, "AML COMPLIANCE REPORT")
+
+    c.setFont("Helvetica", 10)
+
+    y = 720
+
+    for r in rows[:40]:
+        text = f"{r[0]} | {r[1][:60]} | {r[2]} | {r[3]} | {r[4]}"
+        c.drawString(50, y, text)
+        y -= 15
+
+        if y < 50:
+            c.showPage()
+            y = 750
+
+    c.save()
+    buffer.seek(0)
+
+    return send_file(buffer,
+                     as_attachment=True,
+                     download_name="aml_report.pdf",
+                     mimetype="application/pdf")
+
+# -------------------------
+# RUN
+# -------------------------
 if __name__ == "__main__":
     app.run(debug=True)

@@ -1,95 +1,116 @@
 import feedparser
-import csv
 import smtplib
 from email.message import EmailMessage
+from urllib.parse import quote
 
-# =========================
-# RISK KEYWORDS
-# =========================
-risk_keywords = [
-    "fraud", "money laundering", "corruption", "terrorism",
-    "bribery", "scandal", "crime", "investigation",
-    "tax evasion", "arrested", "charged", "illegal", "sanctions"
-]
+from database import init_db, save_alert
 
-# =========================
-# EMAIL CONFIG
-# =========================
-EMAIL_ADDRESS = "odidajudah01@gmail.com"
-EMAIL_PASSWORD = "YOUR_APP_PASSWORD"
-RECEIVER_EMAIL = "odidajudah01@gmail.com"
+# Initialize DB
+init_db()
 
-# Prevent duplicate emails (VERY IMPORTANT)
-sent_alerts = set()
+# -------------------------
+# RISK SCORING MODEL
+# -------------------------
+SCORES = {
+    "fraud": 70,
+    "money laundering": 90,
+    "corruption": 80,
+    "terrorism": 100,
+    "bribery": 60,
+    "scandal": 30,
+    "crime": 40,
+    "investigation": 40,
+    "tax evasion": 75,
+    "arrested": 50,
+    "charged": 50,
+    "illegal": 60,
+    "sanctions": 85
+}
 
-def send_email_alert(name, headline, keyword):
+def get_score(keyword):
+    return SCORES.get(keyword.lower(), 10)
 
-    # prevent duplicates
-    alert_key = f"{name}-{headline}-{keyword}"
-    if alert_key in sent_alerts:
-        return
-    sent_alerts.add(alert_key)
+# -------------------------
+# LOAD PEP WATCHLIST
+# -------------------------
+with open("pep_watchlist.txt", "r", encoding="utf-8") as f:
+    PEP_LIST = [x.strip().lower() for x in f.readlines()]
 
-    subject = f"PEP/Adverse Media Alert: {name}"
+# -------------------------
+# EMAIL FUNCTION
+# -------------------------
+def send_email(name, headline, keyword, risk_level, score):
 
-    body = f"""
-Risk Alert Detected
+    msg = EmailMessage()
+    msg["Subject"] = f"AML ALERT: {name} ({risk_level})"
+    msg["From"] = "your_email@gmail.com"
+    msg["To"] = "your_email@gmail.com"
+
+    msg.set_content(f"""
+AML ALERT DETECTED
 
 Name: {name}
 Headline: {headline}
 Keyword: {keyword}
-"""
-
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = EMAIL_ADDRESS
-    msg["To"] = RECEIVER_EMAIL
-    msg.set_content(body)
+Risk Level: {risk_level}
+Score: {score}
+""")
 
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-            smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+            smtp.login("your_email@gmail.com", "APP_PASSWORD")
             smtp.send_message(msg)
-
-        print("📧 Email sent:", name)
+            print("Email sent ✔")
 
     except Exception as e:
-        print("Email failed:", e)
+        print("Email error:", e)
 
-
+# -------------------------
+# MAIN SCANNER
+# -------------------------
 def run_scan():
 
-    with open("names.txt", "r", encoding="utf-8") as file:
-        names = [n.strip() for n in file.readlines() if n.strip()]
+    names = open("names.txt", encoding="utf-8").read().splitlines()
 
-    with open("alerts.csv", "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["Name", "Headline", "Keyword"])
+    for name in names:
 
-    with open("alerts.csv", "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
+        search_name = quote(name)
+        url = f"https://news.google.com/rss/search?q={search_name}"
 
-        for name in names:
+        feed = feedparser.parse(url)
 
-            print("\nScanning:", name)
+        print(f"\nScanning: {name}")
 
-            url = f"https://news.google.com/rss/search?q={name.replace(' ', '+')}"
-            feed = feedparser.parse(url)
+        for entry in feed.entries[:5]:
 
-            for entry in feed.entries[:5]:
+            title = entry.title.lower()
 
-                title = entry.title
+            for keyword, base_score in SCORES.items():
 
-                for keyword in risk_keywords:
+                if keyword in title:
 
-                    if keyword.lower() in title.lower():
+                    # Risk classification
+                    if base_score >= 80:
+                        level = "HIGH"
+                    elif base_score >= 50:
+                        level = "MEDIUM"
+                    else:
+                        level = "LOW"
 
-                        print("RISK:", name, keyword)
+                    # PEP override
+                    if name.lower() in PEP_LIST:
+                        level = "PEP HIGH"
 
-                        writer.writerow([name, title, keyword])
+                    # Save to DB
+                    save_alert(name, entry.title, keyword, level, base_score)
 
-                        send_email_alert(name, title, keyword)
+                    # Send email alert
+                    send_email(name, entry.title, keyword, level, base_score)
 
+                    print(f"RISK DETECTED: {name} | {keyword} | {level}")
 
+# -------------------------
+# RUN
+# -------------------------
 if __name__ == "__main__":
     run_scan()
