@@ -18,129 +18,221 @@ HTML = """
 
     <style>
         body {
-            font-family: Arial;
-            margin: 25px;
-            background: #f4f6f9;
+            font-family: 'Inter', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(180deg, #e7f5ff 0%, #f8fdff 100%);
+            color: #0f172a;
+        }
+
+        .page {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 24px;
         }
 
         h1 {
-            color: #2c3e50;
+            margin-bottom: 8px;
+            color: #0f4c81;
+        }
+
+        p.subtitle {
+            margin-top: 0;
+            margin-bottom: 24px;
+            color: #334155;
         }
 
         .controls {
-            margin-bottom: 15px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 18px;
         }
 
-        button {
-            padding: 10px 14px;
-            margin-right: 8px;
+        .controls button {
+            padding: 12px 18px;
             border: none;
             cursor: pointer;
-            background: #2c3e50;
+            background: #0f766e;
             color: white;
-            border-radius: 5px;
+            border-radius: 999px;
+            transition: transform 0.16s ease, background 0.16s ease;
         }
 
-        button:hover {
-            background: #1a252f;
+        .controls button.scan {
+            background: #1d4ed8;
+        }
+
+        .controls button.refresh {
+            background: #0f766e;
+        }
+
+        .controls button.export {
+            background: #2563eb;
+        }
+
+        .controls button:hover {
+            transform: translateY(-1px);
+            opacity: 0.95;
+        }
+
+        .status {
+            margin-bottom: 18px;
+            padding: 12px 16px;
+            border-radius: 12px;
+            background: #e0f2fe;
+            color: #0f4c81;
+            border: 1px solid #bae6fd;
+            min-height: 48px;
         }
 
         table {
             width: 100%;
             border-collapse: collapse;
             background: white;
-            margin-top: 15px;
+            border-radius: 18px;
+            overflow: hidden;
+            box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
         }
 
-        th, td {
-            padding: 10px;
-            border: 1px solid #ddd;
-            font-size: 14px;
-        }
-
-        th {
-            background: #2c3e50;
+        thead {
+            background: #0f4c81;
             color: white;
         }
 
+        th, td {
+            padding: 14px 16px;
+            text-align: left;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        td {
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        tr:nth-child(even) td {
+            background: #f8fbff;
+        }
+
         .HIGH {
-            color: red;
-            font-weight: bold;
+            color: #b91c1c;
+            font-weight: 700;
         }
 
         .PEP {
-            color: purple;
-            font-weight: bold;
+            color: #1d4ed8;
+            font-weight: 700;
+        }
+
+        .MEDIUM {
+            color: #0f766e;
+            font-weight: 700;
+        }
+
+        .LOW {
+            color: #065f46;
+        }
+
+        .headline-cell {
+            max-width: 420px;
+            white-space: normal;
+            word-wrap: break-word;
+            overflow-wrap: anywhere;
+        }
+
+        @media (max-width: 960px) {
+            th, td {
+                padding: 12px;
+            }
         }
     </style>
 </head>
 
 <body>
+<div class="page">
+    <h1>🔥 AML / PEP Real-Time Monitoring System</h1>
+    <p class="subtitle">Source-based alerts from Kenyan regulators, courts, gazettes, and media feeds. Click Scan to refresh live data.</p>
 
-<h1>🔥 AML / PEP Real-Time Monitoring System</h1>
+    <div class="controls">
+        <button onclick="loadData('ALL')">All Alerts</button>
+        <button onclick="loadData('HIGH')">High Risk</button>
+        <button onclick="loadData('PEP')">PEP Alerts</button>
+        <button class="scan" onclick="triggerScan()">Scan Now</button>
+        <button class="refresh" onclick="loadData(currentFilter)">Refresh</button>
+        <button class="export" onclick="window.location='/export'">Export PDF</button>
+    </div>
 
-<div class="controls">
-    <button onclick="loadData('ALL')">All Alerts</button>
-    <button onclick="loadData('HIGH')">High Risk</button>
-    <button onclick="loadData('PEP')">PEP Alerts</button>
-    <button onclick="window.location='/export'">Export PDF</button>
+    <div id="status" class="status">Loading alerts...</div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Headline</th>
+                <th>Source</th>
+                <th>Link</th>
+                <th>Keyword</th>
+                <th>Risk Level</th>
+                <th>Score</th>
+                <th>Timestamp</th>
+            </tr>
+        </thead>
+        <tbody id="table"></tbody>
+    </table>
 </div>
 
-<table>
-    <thead>
-        <tr>
-            <th>Name</th>
-            <th>Headline</th>
-            <th>Keyword</th>
-            <th>Risk Level</th>
-            <th>Score</th>
-            <th>Timestamp</th>
-        </tr>
-    </thead>
-
-    <tbody id="table"></tbody>
-</table>
-
 <script>
+    let currentFilter = 'ALL';
+    const statusEl = document.getElementById('status');
 
-async function loadData(filter="ALL") {
+    async function triggerScan() {
+        statusEl.textContent = 'Starting scan...';
+        await fetch('/scan', { method: 'POST' });
+        statusEl.textContent = 'Scan started. Refresh in a moment.';
+    }
 
-    const res = await fetch("/data?filter=" + filter);
-    const data = await res.json();
+    async function loadData(filter='ALL') {
+        currentFilter = filter;
+        statusEl.textContent = 'Loading alerts...';
 
-    let rows = "";
+        const res = await fetch('/data?filter=' + filter);
+        const data = await res.json();
 
-    data.forEach(r => {
+        let rows = '';
 
-        let riskClass = "";
+        data.forEach(r => {
+            let riskClass = '';
+            if (r.risk_level && r.risk_level.includes('HIGH')) {
+                riskClass = 'HIGH';
+            } else if (r.risk_level && r.risk_level.includes('PEP')) {
+                riskClass = 'PEP';
+            } else if (r.risk_level && r.risk_level.includes('MEDIUM')) {
+                riskClass = 'MEDIUM';
+            } else {
+                riskClass = 'LOW';
+            }
 
-        if (r.risk_level && r.risk_level.includes("HIGH")) {
-            riskClass = "HIGH";
-        } else if (r.risk_level && r.risk_level.includes("PEP")) {
-            riskClass = "PEP";
-        }
+            rows += `
+            <tr>
+                <td>${r.name}</td>
+                <td class="headline-cell">${r.headline}</td>
+                <td>${r.source || '-'}</td>
+                <td>${r.source_url ? `<a href="${r.source_url}" target="_blank">Open</a>` : '-'}</td>
+                <td>${r.keyword}</td>
+                <td class="${riskClass}">${r.risk_level || ''}</td>
+                <td>${r.score}</td>
+                <td>${r.timestamp}</td>
+            </tr>`;
+        });
 
-        rows += `
-        <tr>
-            <td>${r.name}</td>
-            <td>${r.headline}</td>
-            <td>${r.keyword}</td>
-            <td class="${riskClass}">${r.risk_level || ""}</td>
-            <td>${r.score}</td>
-            <td>${r.timestamp}</td>
-        </tr>
-        `;
-    });
+        document.getElementById('table').innerHTML = rows;
+        statusEl.textContent = data.length ? `Showing ${data.length} alerts.` : 'No alerts found.';
+    }
 
-    document.getElementById("table").innerHTML = rows;
-}
-
-// auto refresh every 5 seconds
-setInterval(() => loadData("ALL"), 5000);
-loadData("ALL");
-
+    setInterval(() => loadData(currentFilter), 10000);
+    loadData('ALL');
 </script>
-
 </body>
 </html>
 """
@@ -176,10 +268,23 @@ def data():
             "keyword": r[2],
             "risk_level": r[3],
             "score": r[4],
-            "timestamp": r[5]
+            "source": r[5],
+            "source_url": r[6],
+            "timestamp": r[7]
         })
 
     return jsonify(cleaned)
+
+# -------------------------
+# INITIATE SCAN
+# -------------------------
+@app.route("/scan", methods=["POST"])
+def scan_now():
+    from threading import Thread
+    from app import run_scan
+
+    Thread(target=run_scan, daemon=True).start()
+    return jsonify({"status": "Scan started"}), 202
 
 # -------------------------
 # PDF EXPORT (COMPLIANCE REPORT)
@@ -200,7 +305,7 @@ def export_pdf():
     y = 720
 
     for r in rows[:40]:
-        text = f"{r[0]} | {r[1][:60]} | {r[2]} | {r[3]} | {r[4]}"
+        text = f"{r[0]} | {r[1][:60]} | {r[5] or '-'} | {r[6] or '-'} | {r[2]} | {r[3]} | {r[4]}"
         c.drawString(50, y, text)
         y -= 15
 

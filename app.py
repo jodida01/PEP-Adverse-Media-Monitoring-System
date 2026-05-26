@@ -154,7 +154,7 @@ def classify_risk(keyword, name):
     return "LOW", score
 
 
-def scan_entry(source_name, title, summary, search_name=None):
+def scan_entry(source_name, title, summary, source_url=None, search_name=None):
     text = f"{title} {summary}".strip()
     lower_text = text.lower()
     found_keyword = None
@@ -176,9 +176,12 @@ def scan_entry(source_name, title, summary, search_name=None):
     risk_level, score = classify_risk(found_keyword, name)
     headline = f"[{source_name}] {title}" if source_name else title
 
-    save_alert(name, headline, found_keyword, risk_level, score)
-    send_email(name, headline, found_keyword, risk_level, score)
-    print(f"RISK DETECTED: {name} | {found_keyword} | {risk_level} | {source_name}")
+    saved = save_alert(name, headline, found_keyword, risk_level, score, source=source_name, source_url=source_url)
+    if saved:
+        send_email(name, headline, found_keyword, risk_level, score)
+        print(f"RISK DETECTED: {name} | {found_keyword} | {risk_level} | {source_name} | {source_url}")
+    else:
+        print(f"Skipped duplicate alert: {name} | {found_keyword} | {source_name}")
 
 
 def scan_source(source):
@@ -186,11 +189,12 @@ def scan_source(source):
         print(f"\nScanning RSS source: {source['name']}")
         feed = fetch_rss(source["url"])
         for entry in feed.entries[:20]:
-            scan_entry(source["name"], getattr(entry, "title", ""), getattr(entry, "summary", ""))
+            source_url = getattr(entry, "link", source["url"])
+            scan_entry(source["name"], getattr(entry, "title", ""), getattr(entry, "summary", ""), source_url=source_url)
     elif source.get("type") == "html":
         print(f"\nScanning HTML source: {source['name']}")
         text = fetch_html_text(source["url"])
-        scan_entry(source["name"], source["url"], text)
+        scan_entry(source["name"], source["url"], text, source_url=source["url"])
     else:
         print(f"Unknown source type for {source['name']}")
 
