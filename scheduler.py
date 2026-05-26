@@ -1,20 +1,24 @@
+import os
 import schedule
 import time
-import subprocess
-import sys
+from datetime import datetime
+
+from app import run_scan
+
+SCAN_INTERVAL_HOURS = int(os.environ.get("SCAN_INTERVAL_HOURS", "24"))
+
 
 def job():
-    print("Running AML scan...")
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    print(f"[{now}] Running AML scan...")
+    run_scan()
 
-    # Use SAME Python interpreter as current venv
-    subprocess.run([sys.executable, "app.py"])
+if __name__ == "__main__":
+    schedule.every(SCAN_INTERVAL_HOURS).hours.do(job)
 
-# Run every 24 hours
-schedule.every(24).hours.do(job)
+    # Run once immediately on startup.
+    job()
 
-# Run immediately when started
-job()
-
-while True:
-    schedule.run_pending()
-    time.sleep(60)
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
