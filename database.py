@@ -48,17 +48,23 @@ def alert_exists(name, keyword, source):
     return exists
 
 
-def save_alert(name, headline, keyword, risk_level, score, source=None, source_url=None):
+def save_alert(name, headline, keyword, risk_level, score, source=None, source_url=None, timestamp=None):
     if alert_exists(name, keyword, source):
         return False
 
     conn = sqlite3.connect(DB)
     c = conn.cursor()
 
-    c.execute("""
-        INSERT INTO alerts (name, headline, keyword, risk_level, score, source, source_url)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (name, headline, keyword, risk_level, score, source, source_url))
+    if timestamp:
+        c.execute("""
+            INSERT INTO alerts (name, headline, keyword, risk_level, score, source, source_url, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, headline, keyword, risk_level, score, source, source_url, timestamp))
+    else:
+        c.execute("""
+            INSERT INTO alerts (name, headline, keyword, risk_level, score, source, source_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (name, headline, keyword, risk_level, score, source, source_url))
 
     conn.commit()
     conn.close()
@@ -69,8 +75,19 @@ def get_alerts():
     conn = sqlite3.connect(DB)
     c = conn.cursor()
 
-    c.execute("SELECT name, headline, keyword, risk_level, score, source, source_url, timestamp FROM alerts ORDER BY id DESC")
+    c.execute("SELECT name, headline, keyword, risk_level, score, source, source_url, timestamp FROM alerts ORDER BY timestamp DESC")
     data = c.fetchall()
 
     conn.close()
     return data
+
+
+def get_last_scan_time():
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+
+    c.execute("SELECT MAX(timestamp) FROM alerts")
+    result = c.fetchone()
+    conn.close()
+    
+    return result[0] if result and result[0] else None
